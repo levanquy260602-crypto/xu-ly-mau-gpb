@@ -6,6 +6,7 @@ import { TEN_VAI_TRO, gioNgayVN, loiDeHieu } from '../lib/format'
 const MUC = [
   { id: 'nguoi-dung', ten: 'Người dùng' },
   { id: 'dinh-muc', ten: 'Định mức' },
+  { id: 'email', ten: 'Email thông báo' },
   { id: 'nhat-ky', ten: 'Nhật ký thao tác' },
 ]
 
@@ -21,6 +22,7 @@ export default function QuanTri() {
       </div>
       {muc === 'nguoi-dung' && <NguoiDung />}
       {muc === 'dinh-muc' && <DinhMuc />}
+      {muc === 'email' && <EmailThongBao />}
       {muc === 'nhat-ky' && <NhatKy />}
     </div>
   )
@@ -83,7 +85,7 @@ function NguoiDung() {
         <h2>Danh sách người dùng</h2>
         <div className="cuon-ngang">
           <table className="bang">
-            <thead><tr><th>Họ tên</th><th>Email</th><th>Vai trò</th><th>Trạng thái</th></tr></thead>
+            <thead><tr><th>Họ tên</th><th>Email</th><th>Vai trò</th><th>Nhận email</th><th>Trạng thái</th></tr></thead>
             <tbody>
               {ds.map((u) => (
                 <tr key={u.user_id} className={u.hoat_dong ? '' : 'dong-khoa'}>
@@ -95,6 +97,12 @@ function NguoiDung() {
                       onChange={(e) => capNhat(u, { vai_tro: e.target.value })}>
                       {Object.entries(TEN_VAI_TRO).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                     </select>
+                  </td>
+                  <td>
+                    <button className="nut nut-nho nut-phu" aria-pressed={u.nhan_email !== false}
+                      onClick={() => capNhat(u, { nhan_email: u.nhan_email === false })}>
+                      {u.nhan_email === false ? 'Đang tắt' : 'Đang bật'}
+                    </button>
                   </td>
                   <td>
                     {u.user_id === me.user_id ? 'Đang hoạt động' : (
@@ -163,6 +171,130 @@ function DinhMuc() {
         </div>
       </form>
     </section>
+  )
+}
+
+function EmailThongBao() {
+  const { cauHinh, taiCauHinh, thongBao } = useApp()
+  const [form, setForm] = useState(null)
+  const [loi, setLoi] = useState('')
+  const [dangLuu, setDangLuu] = useState(false)
+  const [dangGui, setDangGui] = useState(false)
+  const [ketQua, setKetQua] = useState(null)
+
+  useEffect(() => {
+    if (cauHinh) setForm({
+      email_bat: cauHinh.email_bat ? 'bat' : 'tat',
+      email_gui: cauHinh.email_gui || '',
+      ten_gui: cauHinh.ten_gui || 'Xử lý mẫu - Khoa Giải phẫu bệnh',
+      link_app: cauHinh.link_app || window.location.origin,
+    })
+  }, [cauHinh])
+
+  if (!cauHinh) return <p className="mo">Đang tải…</p>
+  if (!('email_bat' in cauHinh)) {
+    return (
+      <section className="khoi">
+        <h2>Chưa cài phần gửi email</h2>
+        <p>Hãy chạy file <code>email.sql</code> trong Supabase (SQL Editor) rồi tải lại trang này.</p>
+      </section>
+    )
+  }
+  if (!form) return <p className="mo">Đang tải…</p>
+
+  async function luu(e) {
+    e.preventDefault()
+    if (form.email_bat === 'bat' && !form.email_gui.trim()) return setLoi('Nhập email gửi trước khi bật.')
+    setDangLuu(true); setLoi('')
+    const { error } = await supabase.from('xlm_cau_hinh').update({
+      email_bat: form.email_bat === 'bat',
+      email_gui: form.email_gui.trim() || null,
+      ten_gui: form.ten_gui.trim() || 'Xử lý mẫu - Khoa Giải phẫu bệnh',
+      link_app: form.link_app.trim() || null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', 1)
+    setDangLuu(false)
+    if (error) return setLoi(loiDeHieu(error))
+    thongBao('Đã lưu cài đặt email.')
+    taiCauHinh()
+  }
+
+  async function guiThu() {
+    setDangGui(true); setLoi('')
+    const { data, error } = await supabase.rpc('xlm_gui_email_thu')
+    setDangGui(false)
+    if (error) return setLoi(loiDeHieu(error))
+    thongBao(`Đã gửi email thử tới ${data}. Kiểm tra hộp thư (cả mục Spam) sau 1 phút.`)
+  }
+
+  async function xemKetQua() {
+    const { data, error } = await supabase.rpc('xlm_ket_qua_email')
+    if (error) return setLoi(loiDeHieu(error))
+    setKetQua(data || [])
+  }
+
+  const dat = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+
+  return (
+    <>
+      <section className="khoi">
+        <h2>Cài đặt email thông báo</h2>
+        <p className="mo nho">
+          Phần mềm tự gửi email khi: có lượt chạy mới (cho người đọc lame), lame bị đánh giá Không đạt (cho người chạy lượt đó và quản trị),
+          chu kỳ còn 1 lượt (cho quản trị, để chuẩn bị hóa chất), và chu kỳ đã chạy đủ lượt (cho kỹ thuật viên và quản trị).
+          Ai không muốn nhận thì tắt ở mục Người dùng. Email gửi phải là email đã xác minh trên Brevo.
+        </p>
+        <form className="luoi-form" onSubmit={luu}>
+          <fieldset className="truong">
+            <legend>Gửi email</legend>
+            <div className="chon-doan">
+              <label><input type="radio" name="email_bat" value="bat" checked={form.email_bat === 'bat'} onChange={dat('email_bat')} /><span>Bật</span></label>
+              <label><input type="radio" name="email_bat" value="tat" checked={form.email_bat === 'tat'} onChange={dat('email_bat')} /><span>Tắt</span></label>
+            </div>
+          </fieldset>
+          <label className="truong"><span>Email gửi</span>
+            <input type="email" value={form.email_gui} onChange={dat('email_gui')} />
+          </label>
+          <label className="truong"><span>Tên người gửi</span>
+            <input value={form.ten_gui} onChange={dat('ten_gui')} />
+          </label>
+          <label className="truong"><span>Link phần mềm</span>
+            <input type="url" value={form.link_app} onChange={dat('link_app')} />
+          </label>
+          {loi && <p className="loi truong-rong" role="alert">{loi}</p>}
+          <div className="truong-rong hang-nut">
+            <button className="nut nut-chinh" disabled={dangLuu}>{dangLuu ? 'Đang lưu…' : 'Lưu cài đặt'}</button>
+            <button type="button" className="nut nut-phu" onClick={guiThu} disabled={dangGui}>
+              {dangGui ? 'Đang gửi…' : 'Gửi email thử cho tôi'}
+            </button>
+            <button type="button" className="nut nut-phu" onClick={xemKetQua}>Xem kết quả gửi gần đây</button>
+          </div>
+        </form>
+      </section>
+
+      {ketQua && (
+        <section className="khoi">
+          <h2>Kết quả gửi gần đây</h2>
+          <p className="mo nho">Mã 201 là Brevo đã nhận gửi. Mã 400 hoặc 401 thường do khóa API sai hoặc email gửi chưa được xác minh trên Brevo. Kết quả chỉ được giữ khoảng 6 giờ.</p>
+          {ketQua.length === 0 ? <p className="trong">Chưa có lần gửi nào trong vài giờ gần đây.</p> : (
+            <div className="cuon-ngang">
+              <table className="bang">
+                <thead><tr><th>Thời điểm</th><th>Mã</th><th>Phản hồi</th></tr></thead>
+                <tbody>
+                  {ketQua.map((k, i) => (
+                    <tr key={i}>
+                      <td className="khong-xuong-dong">{gioNgayVN(k.thoi_diem)}</td>
+                      <td>{k.ma_trang_thai ?? 'Lỗi'}</td>
+                      <td>{k.loi || k.noi_dung}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+    </>
   )
 }
 
